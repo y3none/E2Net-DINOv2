@@ -41,6 +41,7 @@ class GatedCrossAttention(nn.Module):
         
         # 若空间尺寸过大，则下采样以节省显存
         max_size = 32  # 目前注意力计算的最大空间尺寸
+        # max_size = 48  # 目前注意力计算的最大空间尺寸
         
         if H > max_size or W > max_size:
             query_down = F.adaptive_avg_pool2d(query_feat, (max_size, max_size))

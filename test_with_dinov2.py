@@ -16,7 +16,7 @@ from PIL import Image
 from tqdm import tqdm
 import cv2
 
-from E2Net_dinov2_v3 import E2Net_DINOv2
+from E2Net_dinov2 import E2Net_DINOv2
 try:
     from dataset import Data, Config
 except ImportError:

@@ -15,15 +15,6 @@ class CFZM(nn.Module):
         
         self.channels = channels
         
-        # 为每一级特征设计注意力门控
-        self.attn_gates = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv2d(channels + 1, channels, kernel_size=3, padding=1, bias=False),
-                nn.BatchNorm2d(channels),
-                nn.Sigmoid()
-            ) for _ in range(4)
-        ])
-        
         # 注意力调制后的特征增强卷积
         self.enhance_convs = nn.ModuleList([
             nn.Sequential(

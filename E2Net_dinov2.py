@@ -6,8 +6,8 @@ E2Net + DINOv2 Encoder
 
 import torch
 import torch.nn as nn
-from dinov2_encoder import DINOv2Encoder
-
+from dinov2_encoder_v4 import DINOv2Encoder
+from typing import List
 
 class E2Net_DINOv2(nn.Module):
     """
@@ -21,9 +21,12 @@ class E2Net_DINOv2(nn.Module):
     
     def __init__(
         self,
-        encoder_size='base',
-        freeze_encoder=True,
-        unified_channels=256
+        encoder_size: str       = 'base',
+        freeze_encoder: bool    = True,
+        unified_channels: int   = 256,
+        adapter_at: List[int]   = None,
+        adapter_reduction: int  = 4,
+        adapter_scale: float    = 1e-3, 
     ):
         super(E2Net_DINOv2, self).__init__()
         
@@ -31,11 +34,14 @@ class E2Net_DINOv2(nn.Module):
         print("Initializing E2Net with DINOv2")
         print("="*60)
         
-        # DINOv2 编码器
+        # DINOv2 编码器（含 Parallel Adapter）
         self.encoder = DINOv2Encoder(
-            model_size=encoder_size,
-            freeze=freeze_encoder,
-            pretrained=True
+            model_size        = encoder_size,
+            freeze            = freeze_encoder,
+            pretrained        = True,
+            adapter_at        = adapter_at or [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            adapter_reduction = adapter_reduction,
+            adapter_scale     = adapter_scale, 
         )
         
         # 获取编码器各阶段的输出通道数
