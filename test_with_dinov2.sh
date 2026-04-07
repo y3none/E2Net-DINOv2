@@ -11,9 +11,9 @@ echo "Testing E2Net with DINOv2 Encoder"
 echo "============================================================"
 
 # 配置
-CHECKPOINT="checkpoint/E2Net_dinov2_alpha_14/E2Net_alpha_best.pth"
+CHECKPOINT="checkpoint/E2Net_dinov2_alpha_18/E2Net_alpha_best.pth"
 TEST_ROOT="../dataset/TestDataset"
-SAVE_DIR="results/E2Net_dinov2_alpha_14"
+SAVE_DIR="results/E2Net_dinov2_alpha_18"
 
 # 测试数据集
 TEST_DATASETS="CAMO COD10K CHAMELEON NC4K"
@@ -27,6 +27,7 @@ python test_with_dinov2.py \
     --test_datasets $TEST_DATASETS \
     --test_root $TEST_ROOT \
     --save_dir $SAVE_DIR \
+    --image_size 518 \
     --device $DEVICE
     # --compute_metrics \
 

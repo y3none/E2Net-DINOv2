@@ -50,37 +50,43 @@ def iou_loss(pred, target, smooth=1.0):
     union  = (pred + target - pred * target).sum(dim=1)
     return 1.0 - ((inter + smooth) / (union + smooth)).mean()
 
+
 def compute_loss(predictions, masks,
-                 lambda_dice=1.0, lambda_bce=1.0, lambda_iou=1.0,
-                 lambda_coarse=0.5, lambda_refined=0.3):
+                 lambda_dice=1.0, lambda_bce=1.0, lambda_aux=0.3):
+    """
+    对齐算法文档：L = λ1·L_dice + λ2·L_bce + λ3·L_aux
+
+    主损失：Dice + 边界加权BCE（去掉 IoU，减少冗余）
+    辅助损失：Y_coarse 和 Y_refined 的联合监督
+    """
     Y_coarse, Y_refined, Y_final = predictions
     masks = masks / 255.0 if masks.max() > 1.0 else masks
 
-    # 主损失（最终预测）
-    l_dice_f = dice_loss(Y_final,   masks)
-    l_bce_f  = bce_loss(Y_final,    masks)
-    l_iou_f  = iou_loss(Y_final,    masks)
-    # 辅助损失（粗略）
-    l_dice_c = dice_loss(Y_coarse,  masks)
-    l_bce_c  = bce_loss(Y_coarse,   masks)
-    l_iou_c  = iou_loss(Y_coarse,   masks)
-    # 辅助损失（细化）
-    l_dice_r = dice_loss(Y_refined, masks)
-    l_bce_r  = bce_loss(Y_refined,  masks)
-    l_iou_r  = iou_loss(Y_refined,  masks)
+    # ── 主损失（Y_final，CCM 最终输出）──────────────────────
+    l_dice = dice_loss(Y_final, masks)
+    l_bce = bce_loss(Y_final, masks)
 
-    loss_final   = lambda_dice * l_dice_f + lambda_bce * l_bce_f + lambda_iou * l_iou_f
-    loss_coarse  = lambda_coarse  * (l_dice_c + l_bce_c + l_iou_c)
-    loss_refined = lambda_refined * (l_dice_r + l_bce_r + l_iou_r)
-    total        = loss_final + loss_coarse + loss_refined
+    loss_main = lambda_dice * l_dice + lambda_bce * l_bce
+
+    # ── 辅助损失（中间阶段监督）────────────────────────────
+    # Y_coarse: LFSM 粗略定位（Stage1），用普通 BCE+Dice
+    l_aux_coarse = (bce_loss(Y_coarse, masks) + dice_loss(Y_coarse, masks))
+
+    # Y_refined: CFZM 细化预测（Stage2），权重稍低于 coarse
+    l_aux_refined = (bce_loss(Y_refined, masks) + dice_loss(Y_refined, masks))
+
+    # coarse 权重高于 refined，因为 coarse 是 Stage1 的核心输出
+    loss_aux = lambda_aux * (l_aux_coarse + 0.5 * l_aux_refined)
+
+    # ── 总损失 ─────────────────────────────────────────────
+    total = loss_main + loss_aux
 
     loss_dict = {
-        'total'      : total.item(),
-        'dice_final' : l_dice_f.item(),
-        'bce_final'  : l_bce_f.item(),
-        'iou_final'  : l_iou_f.item(),
-        'loss_coarse': (l_dice_c + l_bce_c + l_iou_c).item(),
-        'loss_refined': (l_dice_r + l_bce_r + l_iou_r).item(),
+        'total': total.item(),
+        'dice_final': l_dice.item(),
+        'bce_final': l_bce.item(),
+        'loss_coarse': l_aux_coarse.item(),
+        'loss_refined': l_aux_refined.item(),
     }
     return total, loss_dict
 
@@ -103,14 +109,8 @@ def train_epoch(model, dataloader, optimizer, device, epoch, args):
         predictions = model(images)
         loss, loss_dict = compute_loss(
             predictions, masks,
-            lambda_dice=args.lambda_dice, lambda_bce=args.lambda_bce,
-            lambda_iou=args.lambda_iou,
-            lambda_coarse=args.lambda_coarse, lambda_refined=args.lambda_refined,
+            lambda_dice=args.lambda_dice, lambda_bce=args.lambda_bce, lambda_aux=args.lambda_aux
         )
-        # loss, loss_dict = compute_loss(
-        #     predictions, masks,
-        #     lambda_dice=args.lambda_dice, lambda_bce=args.lambda_bce
-        # )
 
 
         optimizer.zero_grad()
@@ -163,10 +163,7 @@ def main():
     # ── 损失权重 ───────────────────────────────────────────────────────────
     parser.add_argument('--lambda_dice',      type=float, default=1.0)
     parser.add_argument('--lambda_bce',       type=float, default=1.0)
-    parser.add_argument('--lambda_iou',       type=float, default=1.0,
-                        help='IoU 损失权重（新增，0=关闭）')
-    parser.add_argument('--lambda_coarse',    type=float, default=0.5)
-    parser.add_argument('--lambda_refined',   type=float, default=0.3)
+    parser.add_argument('--lambda_aux',       type=float, default=0.3)
 
     # ── Checkpoint ────────────────────────────────────────────────────────
     parser.add_argument('--checkpoint_dir',   type=str,   default='checkpoint/E2Net_alpha')
@@ -211,7 +208,7 @@ def main():
         encoder_size=args.encoder_size,
         freeze_encoder=args.freeze_encoder,
         unified_channels=args.unified_channels,
-        # # adapter_at=[6, 7, 8, 9, 10, 11]
+        # adapter_at=[6, 7, 8, 9, 10, 11]
         # adapter_at=[3, 6, 9, 11]
     ).to(device)
 
@@ -264,10 +261,7 @@ def main():
 
         print(f"  Train Loss : {train_loss:.4f}")
         print(f"  dice={tc['dice_final']:.4f}  "
-              f"bce={tc['bce_final']:.4f}  "
-              f"iou={tc['iou_final']:.4f}  "
-              f"coarse={tc['loss_coarse']:.4f}  "
-              f"refined={tc['loss_refined']:.4f}")
+              f"bce={tc['bce_final']:.4f}  ")
 
         scheduler.step()
         print(f"  LR         : {optimizer.param_groups[0]['lr']:.6f}")

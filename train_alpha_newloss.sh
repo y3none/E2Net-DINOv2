@@ -26,12 +26,10 @@ UNIFIED_CHANNELS=256
 # ── 损失权重 ──────────────────────────────────────────────────────────────
 LAMBDA_DICE=1.0
 LAMBDA_BCE=1.0
-LAMBDA_IOU=1.0      # 新增 IoU Loss（0=关闭）
-LAMBDA_COARSE=0.5
-LAMBDA_REFINED=0.3
+LAMBDA_AUX=0.3  # 辅助损失总权重（替代之前的 coarse/refined/iou 三个参数）
 
 # ── Checkpoint ────────────────────────────────────────────────────────────
-CHECKPOINT_DIR="checkpoint/E2Net_dinov2_alpha_15"
+CHECKPOINT_DIR="checkpoint/E2Net_dinov2_alpha_19"
 SAVE_FREQ=10        # 每 10 epoch 保存定期 checkpoint
 DEVICE="cuda"
 
@@ -43,7 +41,7 @@ echo "验证集   : 无（全量数据用于训练）"
 echo "保存标准 : 训练 loss 最低 → best；第 ${EPOCHS} epoch → final"
 echo ""
 
-python train_alpha.py \
+python train_alpha_newloss.py \
     --datapath          $DATAPATH          \
     --batch_size        $BATCH_SIZE        \
     --epochs            $EPOCHS            \
@@ -54,9 +52,7 @@ python train_alpha.py \
     --freeze_encoder                       \
     --lambda_dice       $LAMBDA_DICE       \
     --lambda_bce        $LAMBDA_BCE        \
-    --lambda_iou        $LAMBDA_IOU        \
-    --lambda_coarse     $LAMBDA_COARSE        \
-    --lambda_refined        $LAMBDA_REFINED        \
+    --lambda_aux        $LAMBDA_AUX        \
     --checkpoint_dir    $CHECKPOINT_DIR    \
     --save_freq         $SAVE_FREQ         \
     --device            $DEVICE

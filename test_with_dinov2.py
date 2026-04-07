@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 测试 E2Net + DINOv2 编码器模型
-在测试集上评估并生成预测结果
+在测试集上生成预测结果
 """
 
 import os
@@ -167,6 +167,10 @@ def main():
     parser.add_argument('--device', type=str, default='cuda',
                         help='Device to use (cuda or cpu)')
     
+    # 图像尺寸（需与训练时一致）
+    parser.add_argument('--image_size', type=int, default=392,
+                        help='Test image size (must match training)')
+    
     args = parser.parse_args()
     
     # Device
@@ -178,7 +182,8 @@ def main():
     model = E2Net_DINOv2(
         encoder_size=args.encoder_size,
         freeze_encoder=True,
-        unified_channels=args.unified_channels
+        unified_channels=args.unified_channels,
+        adapter_at=[3, 6, 9, 11]
     )
     
     # 加载 checkpoint
@@ -214,7 +219,8 @@ def main():
             datapath=test_path,
             mode='test',
             snapshot=None,
-            batch_size=1
+            batch_size=1,
+            image_size=args.image_size
         )
         test_data = Data(cfg_test, 'E2Net')
         test_loader = DataLoader(

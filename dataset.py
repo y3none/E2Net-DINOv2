@@ -186,8 +186,13 @@ class Data(Dataset):
         self.normalize  = Normalize(mean=cfg.mean, std=cfg.std)
         self.randomcrop = RandomCrop()
         self.randomflip = RandomFlip()
-    
-        self.resize     = Resize(392, 392)
+        # ── 修复：image_size 从 Config 获取，不再硬编码 ────────────
+        # 训练时：cfg.image_size 由 train_alpha.py 传入
+        # 测试时：cfg.image_size 由 test_with_dinov2.py 传入
+        # 若未指定则回退到 392（兼容旧代码）
+        self.image_size = cfg.image_size if cfg.image_size else 392
+        self.resize     = Resize(self.image_size, self.image_size)
+        # self.resize     = Resize(392, 392)
         
         self.randomrotate = RandomRotate()
         self.colorenhance = ColorEnhance()
@@ -227,7 +232,8 @@ class Data(Dataset):
         return len(self.samples)
     
     def collate(self, batch):
-        size = 392
+        # size = 392
+        size = self.image_size
         image, mask = [list(item) for item in zip(*batch)]
         for i in range(len(batch)):
             image[i] = cv2.resize(image[i], dsize=(size, size), interpolation=cv2.INTER_LINEAR)

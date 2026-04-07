@@ -1,33 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DINOv2 Encoder for E2Net — Parallel Adapter（符合图示架构）
-
-架构说明
-────────
-图示要求的拓扑（Parallel Adapter）：
-
-    x ──► Block_1 ──► Block_2 ──► ... ──► Block_i ──►  ⊕  ──► ... ──► Block_n ──►  ⊕  ──► F
-                                               │         ▲                    │         ▲
-                                               └─ Adapter_i ─┘                └─ Adapter_n ─┘
-                                                  (trainable)                    (trainable)
-
-关键特性
-  1. 选择性插入：只在指定层（adapter_at）后接 Adapter，其余层完全不变
-  2. 并联拓扑：Adapter 的输入是当前 Block 的输出，
-               Adapter 的输出通过 ⊕ 注入到【下一个 Block 的输入】
-               （而非串联在当前 Block 输出后直接输出）
-  3. Adapter 结构：Bottleneck（LN → Linear↓ → GELU → Linear↑）+ 可学习 scale
-  4. near-identity 初始化：训练初期不破坏预训练特征分布
-
-与之前方案的对比
-  ┌────────────────┬──────────────────────────┬──────────────────────────────┐
-  │ 方案           │ 拓扑                      │ Adapter 影响范围              │
-  ├────────────────┼──────────────────────────┼──────────────────────────────┤
-  │ post_extract   │ 串联，在所有 block 之后   │ 只影响最终输出特征            │
-  │ per_layer      │ 串联，每层都有            │ 影响当前层输出，不影响后续层  │
-  │ 本方案（图示） │ 并联，仅指定层，⊕注入下层│ 影响后续所有 block 的计算     │
-  └────────────────┴──────────────────────────┴──────────────────────────────┘
+DINOv2 Encoder for E2Net — Parallel Adapter
 """
 
 import torch
@@ -46,18 +20,14 @@ warnings.filterwarnings('ignore', message='xFormers is not available')
 class FeatureAdapter(nn.Module):
     """
     轻量级 Bottleneck Adapter（token 序列域）
-
     结构：
-        x  →  LayerNorm  →  Linear(dim→hidden)  →  GELU
-           →  Linear(hidden→dim)  →  scale · out
-
-    注意：此处不含残差连接，残差（⊕）在外部的 ParallelAdapterBlock 中完成，
-    对应图示中 Adapter 输出单独引出、在外部做 ⊕ 的拓扑。
+        x  ->  LayerNorm  ->  Linear(dim->hidden)  ->  GELU
+           ->  Linear(hidden->dim)  ->  scale · out
 
     参数:
         dim        : token 特征维度（= DINOv2 hidden dim）
         reduction  : 瓶颈压缩比，hidden = max(dim // reduction, 32)
-        init_scale : 输出缩放初始值（接近 0 → near-identity）
+        init_scale : 输出缩放初始值（接近 0 -> near-identity）
     """
 
     def __init__(self, dim: int, reduction: int = 4, init_scale: float = 1e-3):
@@ -84,21 +54,19 @@ class FeatureAdapter(nn.Module):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ParallelAdapterBlock：并联 Adapter 包装（对应图示中带 ⊕ 的节点）
+# ParallelAdapterBlock：并联 Adapter 包装（对应图中带 ⊕ 的节点）
 # ═════════════════════════════════════════════════════════════════════════════
 
 class ParallelAdapterBlock(nn.Module):
     """
-    将 Adapter 并联到 DINOv2 Block 旁，实现图示的 ⊕ 注入逻辑。
-
-    图示对应关系：
+    将 Adapter 并联到 DINOv2 Block 旁，实现 ⊕ 的注入逻辑。
+    对应关系：
         Block_i 输出 out_i
-                │
-                ├──► Adapter_i(out_i) = delta_i
-                │
+                |
+                |-> Adapter_i(out_i) = delta_i
+                |
                 ▼
-        out_i + delta_i  ──►  作为 Block_{i+1} 的输入
-
+        out_i + delta_i  ─>  作为 Block_{i+1} 的输入
     即：Adapter 以当前 Block 的输出作为输入，产生残差 delta，
         delta 被加到当前 Block 的输出上，再传入下一个 Block。
 
@@ -115,9 +83,9 @@ class ParallelAdapterBlock(nn.Module):
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
         数据流：
-            x  →  Block(x)  →  out
-                              +  Adapter(out)   ← 并联，输入是 Block 的输出
-                              =  out + delta     ← ⊕ 操作（图示）
+            x  ─>  Block(x)  ─>  out
+                              +  Adapter(out)   <- 并联，输入是 Block 的输出
+                              =  out + delta    <- ⊕ 操作
         """
         out = self.block(x, *args, **kwargs)
 
@@ -151,37 +119,35 @@ class PlainBlock(nn.Module):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# DINOv2Encoder：主编码器（Parallel Adapter，符合图示）
+# DINOv2Encoder：主编码器（Parallel Adapter）
 # ═════════════════════════════════════════════════════════════════════════════
 
 class DINOv2Encoder(nn.Module):
     """
-    DINOv2 编码器（Parallel Adapter，完全符合图示架构）
-
+    DINOv2 编码器
     数据流（以 adapter_at=[5, 11]，DINOv2-base 共 12 层为例）：
-
         image
           │
-        Block_0  →  Block_1  →  ...  →  Block_5
+        Block_0  ->  Block_1  ->  ...  ->  Block_5
                                               │
-                                         ⊕──Adapter_5   ← trainable
+                                         ⊕──Adapter_5   <- trainable
                                               │
-                                         Block_6  →  ...  →  Block_11
+                                         Block_6  ->  ...  ->  Block_11
                                                                    │
-                                                              ⊕──Adapter_11  ← trainable
+                                                              ⊕──Adapter_11  <- trainable
                                                                    │
                                          get_intermediate_layers([3,6,9,11])
                                                                    │
-                                         Proj × 4  →  reshape  →  interpolate
+                                         Proj x 4  ->  reshape  ->  interpolate
                                                                    │
-                                         [F1, F2, F3, F4]  →  CAEM
+                                         [F1, F2, F3, F4]  ->  CAEM
 
     参数:
         model_size        : 'small' | 'base' | 'large' | 'giant'
         freeze            : 是否冻结 backbone（Adapter/Proj 始终可训练）
         pretrained        : 是否加载预训练权重
         adapter_at        : 插入 Adapter 的层索引列表（0-based）
-                            默认 [3, 6, 9, 11]
+                            默认 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
         adapter_reduction : Adapter 瓶颈压缩比，默认 4
         adapter_scale     : Adapter 残差初始缩放因子，默认 1e-3
     """
@@ -191,7 +157,7 @@ class DINOv2Encoder(nn.Module):
         model_size: str       = 'base',
         freeze: bool          = True,
         pretrained: bool      = True,
-        adapter_at: List[int] = None,   # 默认 [5, 11]
+        adapter_at: List[int] = None,
         adapter_reduction: int  = 4,
         adapter_scale: float  = 1e-3,
     ):
@@ -305,7 +271,7 @@ class DINOv2Encoder(nn.Module):
                 adapter = FeatureAdapter(self.feature_dim, reduction, init_scale)
                 adapter_dict[idx] = adapter
                 new_blocks.append(ParallelAdapterBlock(block, adapter))
-                print(f"  Block {idx:2d} : ParallelAdapterBlock  ← Adapter 插入")
+                print(f"  Block {idx:2d} : ParallelAdapterBlock  <- Adapter 插入")
             else:
                 new_blocks.append(PlainBlock(block))
                 print(f"  Block {idx:2d} : PlainBlock             (frozen, no adapter)")
@@ -336,7 +302,7 @@ class DINOv2Encoder(nn.Module):
         print(f"  out_channels      : {self.out_channels}")
         print(f"  Total params      : {total:,}")
         print(f"  Trainable params  : {trainable:,}")
-        print(f"    ↳ Adapter × {len(self.adapter_at)}  : {adp_n:,}")
+        print(f"    ↳ Adapter x {len(self.adapter_at)}  : {adp_n:,}")
         print(f"    ↳ Proj          : {proj_n:,}")
         print(f"  Frozen  params    : {total - trainable:,}")
         print("=" * 60 + "\n")
@@ -358,10 +324,10 @@ class DINOv2Encoder(nn.Module):
                 F4 : [B, C,   H/32, W/32]
 
         内部流程：
-            image → backbone（含 Parallel Adapter ⊕ 注入）
-                  → get_intermediate_layers([3,6,9,11])
-                  → Proj + reshape + interpolate
-                  → [F1, F2, F3, F4]
+            image -> backbone（含 Parallel Adapter ⊕ 注入）
+                  -> get_intermediate_layers([3,6,9,11])
+                  -> Proj + reshape + interpolate
+                  -> [F1, F2, F3, F4]
         """
         _, _, H, W = x.shape
 
@@ -376,7 +342,7 @@ class DINOv2Encoder(nn.Module):
         return self._pyramid(raw_features, H, W)
 
     def _pyramid(self, feats, h: int, w: int):
-        """Proj → reshape → interpolate，构建多尺度特征金字塔"""
+        """Proj -> reshape -> interpolate，构建多尺度特征金字塔"""
         pyr    = []
         ps     = 14
         nh, nw = h // ps, w // ps
@@ -398,7 +364,7 @@ class DINOv2Encoder(nn.Module):
             # Proj（token 维度）
             f = self.proj[stage](f)                        # [B, N, C']
 
-            # reshape → 空间特征图
+            # reshape -> 空间特征图
             N  = f.shape[1]
             hw = int(N ** 0.5)
             f  = f.transpose(1, 2).reshape(B, -1, hw, hw) # [B, C', hw, hw]
