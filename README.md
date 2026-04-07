@@ -6,3 +6,5 @@
 `bash test_with_dinov2.sh`  
 ### 评估
 `bash eval.sh`  
+### Performance
+![](/figs/E2Net_performance_04.png)
