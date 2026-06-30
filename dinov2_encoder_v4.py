@@ -165,6 +165,8 @@ class DINOv2Encoder(nn.Module):
 
         self.model_size = model_size
         self.adapter_at = sorted(set(adapter_at)) if adapter_at else [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        if adapter_at == []:
+            self.adapter_at = adapter_at
 
         print("=" * 60)
         print("DINOv2 Encoder  [Parallel Adapter — 图示架构]")
@@ -215,6 +217,7 @@ class DINOv2Encoder(nn.Module):
         import os
         cache_dir  = os.path.expanduser('~/.cache/torch/hub')
         local_path = os.path.join(cache_dir, "facebookresearch_dinov2_main")
+        # local_path = "/Users/y3/Desktop/伪装目标检测/E2Net-DINOv2/dinov2-main"
 
         if os.path.exists(local_path):
             model = torch.hub.load(
@@ -225,8 +228,7 @@ class DINOv2Encoder(nn.Module):
             return model
 
         raise RuntimeError(
-            "Failed to load DINOv2. "
-            "Please download manually: python download_dinov2.py"
+            "Failed to load DINOv2. Please download manually"
         )
 
     def _setup_dims(self):

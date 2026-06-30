@@ -211,8 +211,8 @@ def main():
         encoder_size=args.encoder_size,
         freeze_encoder=args.freeze_encoder,
         unified_channels=args.unified_channels,
-        # # adapter_at=[6, 7, 8, 9, 10, 11]
-        # adapter_at=[3, 6, 9, 11]
+        adapter_at=[3, 6, 9, 11]
+        # adapter_at=[]
     ).to(device)
 
     total     = sum(p.numel() for p in model.parameters())

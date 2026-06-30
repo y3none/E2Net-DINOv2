@@ -39,7 +39,7 @@ class E2Net_DINOv2(nn.Module):
             model_size        = encoder_size,
             freeze            = freeze_encoder,
             pretrained        = True,
-            adapter_at        = adapter_at or [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            adapter_at        = adapter_at,
             adapter_reduction = adapter_reduction,
             adapter_scale     = adapter_scale, 
         )
